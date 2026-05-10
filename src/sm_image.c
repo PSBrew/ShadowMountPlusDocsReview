@@ -1003,6 +1003,8 @@ bool unmount_usb_image_mounts_for_suspend(void) {
               attach_backend_name(cached_entry.backend), cached_entry.path);
     if (unmount_image(cached_entry.path, cached_entry.unit_id,
                       cached_entry.backend)) {
+      log_debug("  [IMG][%s] USB suspend unmounted: %s",
+                attach_backend_name(cached_entry.backend), cached_entry.path);
       invalidate_image_cache_entry(k);
       continue;
     }

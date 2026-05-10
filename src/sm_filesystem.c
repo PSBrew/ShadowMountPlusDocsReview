@@ -951,6 +951,11 @@ static bool cleanup_mount_links_entry(const char *title_id,
         keep_mount_link = true;
         log_debug("  [LINK] failed to unmount mount stack for %s",
                   state.system_ex_path);
+      } else if (ctx->match_usb_sources) {
+        log_debug("  [LINK] unmounted USB-backed mount stack: %s source=%s%s%s",
+                  state.system_ex_path, source_path,
+                  has_image_source ? " image=" : "",
+                  has_image_source ? image_source_path : "");
       }
     }
   }
