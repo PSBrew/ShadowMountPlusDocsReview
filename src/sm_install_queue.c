@@ -266,7 +266,7 @@ static void poll_pending_installs(void) {
 }
 
 uint64_t sm_install_next_wake_us(uint64_t now_us) {
-  if (runtime_scan_blocked())
+  if (runtime_sleep_mode_active())
     return 0;
 
   if (!install_queue_active())
@@ -294,14 +294,14 @@ uint64_t sm_install_next_wake_us(uint64_t now_us) {
 }
 
 void sm_install_poll_pending(void) {
-  if (runtime_scan_blocked())
+  if (runtime_sleep_mode_active())
     return;
 
   poll_pending_installs();
 }
 
 void sm_install_service_pending(void) {
-  if (runtime_scan_blocked())
+  if (runtime_sleep_mode_active())
     return;
 
   if (!install_queue_active())
@@ -389,7 +389,7 @@ static void drop_queued_install_entry(pending_install_entry_t *entry) {
 }
 
 bool sm_install_submit_queued(void) {
-  if (runtime_scan_blocked())
+  if (runtime_sleep_mode_active())
     return true;
 
   int queued_count = count_queued_installs();

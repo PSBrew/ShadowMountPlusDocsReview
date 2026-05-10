@@ -887,7 +887,7 @@ static void apply_runtime_config_reload_effects(const runtime_config_t *old_cfg,
 }
 
 static bool should_abort_scan_cycle(void) {
-  return should_stop_requested() || runtime_scan_blocked();
+  return should_stop_requested() || runtime_sleep_mode_active();
 }
 
 static bool run_full_scan_cycle(bool startup_sync, const char *reason,
@@ -1257,14 +1257,14 @@ void sm_scanner_wake(void) {
 
 bool sm_scanner_run_startup_sync(void) {
   while (!should_stop_requested()) {
-    while (runtime_scan_blocked() && !should_stop_requested())
+    while (runtime_sleep_mode_active() && !should_stop_requested())
       sceKernelUsleep(200000);
 
     if (should_stop_requested())
       return false;
     if (run_full_scan_cycle(true, NULL, NULL))
       return true;
-    if (!runtime_scan_blocked())
+    if (!runtime_sleep_mode_active())
       return false;
   }
 
@@ -1317,7 +1317,7 @@ void sm_scanner_run_loop(void) {
       break;
     }
 
-    if (runtime_scan_blocked()) {
+    if (runtime_sleep_mode_active()) {
       was_sleeping = true;
       fd_set readfds;
       FD_ZERO(&readfds);
@@ -1349,7 +1349,7 @@ void sm_scanner_run_loop(void) {
     if (consume_scan_now_request(scan_reason, sizeof(scan_reason))) {
       bool unstable_found = false;
       if (!run_full_scan_cycle(false, scan_reason, &unstable_found)) {
-        if (runtime_scan_blocked())
+        if (runtime_sleep_mode_active())
           continue;
         break;
       }
@@ -1415,7 +1415,7 @@ void sm_scanner_run_loop(void) {
     if (next_full_resync_us != 0 && now_us >= next_full_resync_us) {
       bool unstable_found = false;
       if (!run_full_scan_cycle(false, NULL, &unstable_found)) {
-        if (runtime_scan_blocked())
+        if (runtime_sleep_mode_active())
           continue;
         break;
       }
@@ -1467,7 +1467,7 @@ void sm_scanner_run_loop(void) {
 
       bool unstable_found = false;
       if (!run_targeted_scan_cycle(dirty_root_index, &unstable_found)) {
-        if (runtime_scan_blocked()) {
+        if (runtime_sleep_mode_active()) {
           scanner_root_state_t *state =
               &g_scanner_root_states[dirty_root_index];
           if (cleanup_pending)

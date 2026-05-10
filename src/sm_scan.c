@@ -423,7 +423,7 @@ static bool mount_backport_overlay_for_cached_game(const char *source_path,
                                                    void *ctx_ptr) {
   (void)title_name;
 
-  if (should_stop_requested())
+  if (should_stop_requested() || runtime_sleep_mode_active())
     return false;
 
   backport_overlay_ctx_t *ctx = (backport_overlay_ctx_t *)ctx_ptr;
@@ -504,7 +504,7 @@ static void collect_scan_candidates_from_root(
     int *candidate_count, const struct AppDbTitleList *app_db_titles,
     bool app_db_titles_ready, char discovered_param_roots[][MAX_PATH],
     int *discovered_param_root_count, bool *unstable_found_out) {
-  if (should_stop_requested() || runtime_scan_blocked())
+  if (should_stop_requested() || runtime_sleep_mode_active())
     return;
 
   unsigned int scan_depth = runtime_config()->scan_depth;
@@ -567,7 +567,7 @@ int collect_scan_candidates(scan_candidate_t *candidates, int max_candidates,
     log_debug("  [DB] app.db title list unavailable for this scan cycle");
 
   for (int i = 0; i < get_scan_path_count(); i++) {
-    if (should_stop_requested() || runtime_scan_blocked())
+    if (should_stop_requested() || runtime_sleep_mode_active())
       break;
     collect_scan_candidates_from_root(get_scan_path(i), candidates,
                                       max_candidates,

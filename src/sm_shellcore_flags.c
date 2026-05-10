@@ -12,6 +12,7 @@
 
 #define SHELLCORE_FLAG_WAITMODE_OR 2u
 #define SHELLCORE_FLAG_ALL_BITS UINT64_MAX
+#define SYSTEM_STATE_MGR_STATUS_SHELLUI_SHUTDOWN_IN_PROGRESS 0x0000000000200000ULL
 
 typedef intptr_t sm_kernel_event_flag_t;
 
@@ -45,8 +46,8 @@ static shellcore_flag_monitor_t g_shellcore_flags[] = {
     {.name = "SceShellCoreUtilAppFocus", .handle = -1, .required = true},
     {.name = "SceSystemStateMgrInfo", .handle = -1, .required = true},
     {.name = "SceLncUtilSystemStatus", .handle = -1, .required = false},
-/*    {.name = "SceSystemStateMgrStatus", .handle = -1},
-    {.name = "SceSysCoreSuspend", .handle = -1},
+    {.name = "SceSystemStateMgrStatus", .handle = -1},
+/*    {.name = "SceSysCoreSuspend", .handle = -1},
     {.name = "SceShellCoreUtilPowerControl", .handle = -1},
     {.name = "SceShellCoreUtilRunLevel", .handle = -1},
     {.name = "SceShellCoreUtilUIStatus", .handle = -1},
@@ -64,6 +65,30 @@ static bool g_shellcore_flag_thread_started = false;
 static bool g_shellcore_flag_start_ready = false;
 static bool g_shellcore_flag_start_success = false;
 static volatile sig_atomic_t g_shellcore_flag_stop_requested = 0;
+
+static const shellcore_flag_bit_desc_t g_system_state_mgr_status_bits[] = {
+    {0x0000000000000001ULL, "CEC_ONE_TOUCH_PLAY_COMMAND"},
+    {0x0000000000000002ULL, "MEDIA_PLAYBACK_MODE"},
+    {0x0000000000000004ULL, "BD_DRIVE_READY"},
+    {0x0000000000000008ULL, "TICK_MUSIC_PLAYBACK"},
+    {0x0000000000000010ULL, "TICK_VIDEO_PLAYBACK"},
+    {0x0000000000000020ULL, "TICK_0x20"},
+    {0x0000000000000040ULL, "TICK_PARTY_CHAT"},
+    {0x0000000000000100ULL, "TURN_OFF_REQUEST"},
+    {0x0000000000000200ULL, "REBOOT_REQUEST"},
+    {0x0000000000000400ULL, "ENTER_STANDBY_REQUEST"},
+    {0x0000000000010000ULL, "START_SHUTDOWN_TIMER"},
+    {0x0000000000020000ULL, "START_REBOOT_TIMER"},
+    {0x0000000000040000ULL, "START_STANDBY_TIMER"},
+    {0x0000000000080000ULL, "EXTEND_SHUTDOWN_TIMER"},
+    {0x0000000000100000ULL, "CANCEL_SHUTDOWN_TIMER"},
+    {SYSTEM_STATE_MGR_STATUS_SHELLUI_SHUTDOWN_IN_PROGRESS,
+     "SHELLUI_SHUTDOWN_IN_PROGRESS"},
+    {0x0000000000400000ULL, "EXTEND_SHUTDOWN_TIMER_POST_AUTOUPDATE"},
+    {0x0000000001000000ULL, "BIGAPP_LAUNCH_READY"},
+    {0x0000000004000000ULL, "VSH_AUTO_UPDATE_VERIFY_DONE"},
+    {0x0000000008000000ULL, "START_REBOOT_TIMER_FAST"},
+};
 
 #if 0
 static const shellcore_flag_bit_desc_t g_power_control_bits[] = {
@@ -100,28 +125,6 @@ static const shellcore_flag_bit_desc_t g_vshctl_internal_user_bits[] = {
     {0x0000000000000001ULL, "INTERNAL_CRONOS_USER"},
 };
 
-static const shellcore_flag_bit_desc_t g_system_state_mgr_status_bits[] = {
-    {0x0000000000000001ULL, "CEC_ONE_TOUCH_PLAY_COMMAND"},
-    {0x0000000000000002ULL, "MEDIA_PLAYBACK_MODE"},
-    {0x0000000000000004ULL, "BD_DRIVE_READY"},
-    {0x0000000000000008ULL, "TICK_MUSIC_PLAYBACK"},
-    {0x0000000000000010ULL, "TICK_VIDEO_PLAYBACK"},
-    {0x0000000000000020ULL, "TICK_0x20"},
-    {0x0000000000000040ULL, "TICK_PARTY_CHAT"},
-    {0x0000000000000100ULL, "TURN_OFF_REQUEST"},
-    {0x0000000000000200ULL, "REBOOT_REQUEST"},
-    {0x0000000000000400ULL, "ENTER_STANDBY_REQUEST"},
-    {0x0000000000010000ULL, "START_SHUTDOWN_TIMER"},
-    {0x0000000000020000ULL, "START_REBOOT_TIMER"},
-    {0x0000000000040000ULL, "START_STANDBY_TIMER"},
-    {0x0000000000080000ULL, "EXTEND_SHUTDOWN_TIMER"},
-    {0x0000000000100000ULL, "CANCEL_SHUTDOWN_TIMER"},
-    {0x0000000000200000ULL, "SHELLUI_SHUTDOWN_IN_PROGRESS"},
-    {0x0000000000400000ULL, "EXTEND_SHUTDOWN_TIMER_POST_AUTOUPDATE"},
-    {0x0000000001000000ULL, "BIGAPP_LAUNCH_READY"},
-    {0x0000000004000000ULL, "VSH_AUTO_UPDATE_VERIFY_DONE"},
-    {0x0000000008000000ULL, "START_REBOOT_TIMER_FAST"},
-};
 
 static const shellcore_flag_bit_desc_t g_boot_status_bits[] = {
     {0x0000000000000002ULL, "BIT_0x2"},
@@ -176,6 +179,13 @@ static const shellcore_flag_bit_desc_t *get_shellcore_flag_bits(
     return g_lnc_util_system_status_bits;
   }
 
+  if (strcmp(flag->name, "SceSystemStateMgrStatus") == 0) {
+    if (count_out) {
+      *count_out = sizeof(g_system_state_mgr_status_bits) /
+                   sizeof(g_system_state_mgr_status_bits[0]);
+    }
+    return g_system_state_mgr_status_bits;
+  }
 #if 0
   if (strcmp(flag->name, "SceShellCoreUtilPowerControl") == 0) {
     if (count_out)
@@ -199,13 +209,6 @@ static const shellcore_flag_bit_desc_t *get_shellcore_flag_bits(
     return g_vshctl_internal_user_bits;
   }
 
-  if (strcmp(flag->name, "SceSystemStateMgrStatus") == 0) {
-    if (count_out) {
-      *count_out = sizeof(g_system_state_mgr_status_bits) /
-                   sizeof(g_system_state_mgr_status_bits[0]);
-    }
-    return g_system_state_mgr_status_bits;
-  }
 
   if (strcmp(flag->name, "SceBootStatusFlags") == 0) {
     if (count_out)
@@ -505,6 +508,11 @@ static void set_shellcore_flag_start_result(bool success) {
   pthread_mutex_unlock(&g_shellcore_flag_mutex);
 }
 
+static void enter_sleep_mode_and_cleanup(const char *reason) {
+  if (request_runtime_sleep_mode(true, reason))
+    unmount_usb_sources_for_suspend();
+}
+
 static void reset_shellcore_flag_state(shellcore_flag_monitor_t *flag) {
   if (!flag)
     return;
@@ -614,6 +622,7 @@ static void poll_shellcore_flag(shellcore_flag_monitor_t *flag) {
   bool entered_main_on_standby = false;
   bool entered_suspend_on_going = false;
   bool entered_resume_working = false;
+  bool entered_shellui_shutdown_in_progress = false;
   bool is_system_state_mgr_info = false;
   unsigned current_state = 0;
   unsigned previous_state = 0;
@@ -661,6 +670,13 @@ static void poll_shellcore_flag(shellcore_flag_monitor_t *flag) {
         flag->has_last_pattern &&
         current_state == SYSTEM_STATE_MGR_STATE_WORKING &&
         previous_state != SYSTEM_STATE_MGR_STATE_WORKING;
+  } else if (strcmp(flag->name, "SceSystemStateMgrStatus") == 0) {
+    entered_shellui_shutdown_in_progress =
+        (result_pattern &
+         SYSTEM_STATE_MGR_STATUS_SHELLUI_SHUTDOWN_IN_PROGRESS) != 0 &&
+        (!flag->has_last_pattern ||
+         (flag->last_pattern &
+          SYSTEM_STATE_MGR_STATUS_SHELLUI_SHUTDOWN_IN_PROGRESS) == 0);
   }
 
   flag->last_pattern = result_pattern;
@@ -675,17 +691,19 @@ static void poll_shellcore_flag(shellcore_flag_monitor_t *flag) {
   if (entered_shutdown_on_going) {
     request_shutdown_stop("SceSystemStateMgrInfo=SHUTDOWN_ON_GOING");
   }
-  if (entered_main_on_standby) {
-    request_runtime_scan_block(true, "SceSystemStateMgrInfo=MAIN_ON_STANDBY");
-    unmount_usb_sources_for_suspend();
+  if (entered_main_on_standby || entered_suspend_on_going) {
+    const char *sleep_reason =
+        entered_main_on_standby ? "SceSystemStateMgrInfo=MAIN_ON_STANDBY"
+                                : "SceSystemStateMgrInfo=SUSPEND_ON_GOING";
+    enter_sleep_mode_and_cleanup(sleep_reason);
   }
-  if (entered_suspend_on_going) {
-    request_runtime_sleep_mode(true, "SceSystemStateMgrInfo=SUSPEND_ON_GOING");
+  if (entered_shellui_shutdown_in_progress) {
+    enter_sleep_mode_and_cleanup(
+        "SceSystemStateMgrStatus=SHELLUI_SHUTDOWN_IN_PROGRESS");
   }
   if (entered_resume_working) {
     request_scan_now("SceSystemStateMgrInfo=WORKING");
     request_runtime_sleep_mode(false, "SceSystemStateMgrInfo=WORKING");
-    request_runtime_scan_block(false, "SceSystemStateMgrInfo=WORKING");
   }
 }
 

@@ -830,7 +830,7 @@ bool mount_title_nullfs(const char *title_id, const char *src_path) {
       IOVEC_ENTRY("fspath"), IOVEC_ENTRY(dst),
   };
 
-  if (runtime_scan_blocked())
+  if (runtime_sleep_mode_active())
     return false;
 
   if (nmount(iov, IOVEC_SIZE(iov), 0) != 0) {
@@ -839,7 +839,7 @@ bool mount_title_nullfs(const char *title_id, const char *src_path) {
     return false;
   }
 
-  if (runtime_scan_blocked()) {
+  if (runtime_sleep_mode_active()) {
     if (unmount(dst, 0) != 0 && errno != ENOENT && errno != EINVAL)
       (void)unmount(dst, MNT_FORCE);
     return false;

@@ -756,7 +756,7 @@ bool mount_image(const char *file_path, image_fs_type_t fs_type) {
     return false;
   if (!stat_image_file(file_path, &st))
     return false;
-  if (runtime_scan_blocked())
+  if (runtime_sleep_mode_active())
     return false;
 
   log_debug("  [IMG] Mounting image (%s): %s -> %s", image_fs_name(fs_type),
@@ -779,7 +779,7 @@ bool mount_image(const char *file_path, image_fs_type_t fs_type) {
                            attach_backend, &unit_id, devname, sizeof(devname))) {
     return false;
   }
-  if (runtime_scan_blocked()) {
+  if (runtime_sleep_mode_active()) {
     (void)detach_attached_unit(attach_backend, unit_id);
     return false;
   }
@@ -787,7 +787,7 @@ bool mount_image(const char *file_path, image_fs_type_t fs_type) {
                             mount_point, mount_read_only, force_mount)) {
     return false;
   }
-  if (runtime_scan_blocked()) {
+  if (runtime_sleep_mode_active()) {
     (void)unmount_image(file_path, unit_id, attach_backend);
     return false;
   }
