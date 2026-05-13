@@ -41,13 +41,18 @@ bool get_game_info(const char *base_path, const struct stat *param_st,
   if (load_cached_game_info(base_path, param_st, out_id, out_name, &cached_valid))
     return cached_valid;
 
-  if (param_st->st_size <= 0 || param_st->st_size > 1024 * 1024) {
+  if (param_st->st_size <= 0 || param_st->st_size > MAX_PARAM_JSON_SIZE) {
     store_cached_game_info(base_path, param_st, false, "", "");
     return false;
   }
 
   char path[MAX_PATH];
-  snprintf(path, sizeof(path), "%s/sce_sys/param.json", base_path);
+  int written = snprintf(path, sizeof(path), "%s/sce_sys/param.json",
+                         base_path);
+  if (written < 0 || (size_t)written >= sizeof(path)) {
+    store_cached_game_info(base_path, param_st, false, "", "");
+    return false;
+  }
   FILE *f = fopen(path, "rb");
   if (!f) {
     store_cached_game_info(base_path, param_st, false, "", "");

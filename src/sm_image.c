@@ -528,6 +528,30 @@ static bool reuse_existing_image_mount(const char *file_path,
   return false;
 }
 
+static bool handle_cached_or_existing_image_mount_locked(
+    const char *file_path, const char *mount_point, bool *success_out) {
+  if (success_out)
+    *success_out = false;
+
+  if (runtime_sleep_mode_active())
+    return true;
+
+  if (is_cached_image_path(file_path)) {
+    if (success_out)
+      *success_out = true;
+    return true;
+  }
+
+  bool cache_failed = false;
+  if (reuse_existing_image_mount(file_path, mount_point, &cache_failed)) {
+    if (success_out)
+      *success_out = !runtime_sleep_mode_active();
+    return true;
+  }
+
+  return cache_failed;
+}
+
 static bool stat_image_file(const char *file_path, struct stat *st_out) {
   if (stat(file_path, st_out) != 0) {
     log_debug("  [IMG] stat failed for %s: %s", file_path, strerror(errno));
@@ -743,21 +767,39 @@ bool mount_image(const char *file_path, image_fs_type_t fs_type) {
     mount_mode_overridden =
         get_image_mode_override(filename, &mount_read_only);
 
-  if (is_cached_image_path(file_path))
-    return true;
+  if (runtime_sleep_mode_active())
+    return false;
 
   char mount_point[MAX_PATH];
   build_image_mount_point(file_path, mount_point);
+
+  bool handled = false;
+  bool success = false;
+  runtime_mount_state_lock();
+  handled =
+      handle_cached_or_existing_image_mount_locked(file_path, mount_point,
+                                                   &success);
+  runtime_mount_state_unlock();
+  if (handled)
+    return success;
+
   struct stat st;
-  bool cache_failed = false;
-  if (reuse_existing_image_mount(file_path, mount_point, &cache_failed))
-    return true;
-  if (cache_failed)
-    return false;
   if (!stat_image_file(file_path, &st))
     return false;
   if (runtime_sleep_mode_active())
     return false;
+  runtime_mount_state_lock();
+  if (runtime_sleep_mode_active()) {
+    runtime_mount_state_unlock();
+    return false;
+  }
+  handled =
+      handle_cached_or_existing_image_mount_locked(file_path, mount_point,
+                                                   &success);
+  if (handled) {
+    runtime_mount_state_unlock();
+    return success;
+  }
 
   log_debug("  [IMG] Mounting image (%s): %s -> %s", image_fs_name(fs_type),
             file_path, mount_point);
@@ -777,23 +819,28 @@ bool mount_image(const char *file_path, image_fs_type_t fs_type) {
   memset(devname, 0, sizeof(devname));
   if (!attach_image_device(file_path, fs_type, mount_read_only, st.st_size,
                            attach_backend, &unit_id, devname, sizeof(devname))) {
+    runtime_mount_state_unlock();
     return false;
   }
   if (runtime_sleep_mode_active()) {
     (void)detach_attached_unit(attach_backend, unit_id);
+    runtime_mount_state_unlock();
     return false;
   }
   if (!perform_image_nmount(file_path, fs_type, attach_backend, unit_id, devname,
                             mount_point, mount_read_only, force_mount)) {
+    runtime_mount_state_unlock();
     return false;
   }
   if (runtime_sleep_mode_active()) {
     (void)unmount_image(file_path, unit_id, attach_backend);
+    runtime_mount_state_unlock();
     return false;
   }
 
   if (!validate_mounted_image(file_path, fs_type, attach_backend, unit_id,
                               devname, mount_point)) {
+    runtime_mount_state_unlock();
     return false;
   }
 
@@ -810,8 +857,10 @@ bool mount_image(const char *file_path, image_fs_type_t fs_type) {
               file_path, mount_point);
     (void)unmount_image(file_path, unit_id, attach_backend);
     errno = ENOSPC;
+    runtime_mount_state_unlock();
     return false;
   }
+  runtime_mount_state_unlock();
   return true;
 }
 

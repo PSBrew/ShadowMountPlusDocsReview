@@ -235,7 +235,7 @@ static void poll_pending_installs(void) {
 
   invalidate_app_db_title_cache();
 
-  const struct AppDbTitleList *app_db_titles = NULL;
+  struct AppDbTitleList app_db_titles = {0};
   bool app_db_titles_ready = get_app_db_title_list_cached(&app_db_titles);
   uint64_t now_us = monotonic_time_us();
 
@@ -248,7 +248,7 @@ static void poll_pending_installs(void) {
       continue;
 
     if (app_db_titles_ready &&
-        app_db_title_list_contains(app_db_titles, entry->title_id)) {
+        app_db_title_list_contains(&app_db_titles, entry->title_id)) {
       finalize_pending_install_success(entry);
       continue;
     }
@@ -263,6 +263,7 @@ static void poll_pending_installs(void) {
   schedule_pending_install_poll(now_us);
   if (g_submitted_install_count == 0)
     schedule_queued_install_submit(now_us);
+  free_app_db_title_list(&app_db_titles);
 }
 
 uint64_t sm_install_next_wake_us(uint64_t now_us) {

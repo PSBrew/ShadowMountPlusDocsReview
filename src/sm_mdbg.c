@@ -281,11 +281,21 @@ static size_t find_log_overlap(const char *current, size_t current_len) {
   size_t max_overlap = g_mdbg.log_snapshot_length < current_len
                            ? g_mdbg.log_snapshot_length
                            : current_len;
-  for (size_t overlap = max_overlap; overlap > 0; --overlap) {
-    if (!memcmp(g_mdbg.log_snapshot + g_mdbg.log_snapshot_length - overlap,
-                current, overlap)) {
+
+  const char *search = g_mdbg.log_snapshot + g_mdbg.log_snapshot_length -
+                       max_overlap;
+  const char *end = g_mdbg.log_snapshot + g_mdbg.log_snapshot_length;
+  while (search < end) {
+    const char *candidate =
+        memchr(search, current[0], (size_t)(end - search));
+    if (!candidate)
+      break;
+
+    size_t overlap = (size_t)(end - candidate);
+    if (!memcmp(candidate, current, overlap))
       return overlap;
-    }
+
+    search = candidate + 1;
   }
 
   return 0;

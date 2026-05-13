@@ -18,6 +18,9 @@ bool runtime_sleep_mode_active(void);
 // Enter or leave sleep mode with a descriptive source string.
 // Returns true when the runtime sleep state changed.
 bool request_runtime_sleep_mode(bool active, const char *reason);
+// Serialize mount/link/cache publication against suspend cleanup.
+void runtime_mount_state_lock(void);
+void runtime_mount_state_unlock(void);
 // Request an immediate scan cycle with a descriptive source string.
 void request_scan_now(const char *reason);
 // Consume a pending immediate scan request and copy its reason into caller storage.

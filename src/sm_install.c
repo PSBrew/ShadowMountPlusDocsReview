@@ -226,11 +226,21 @@ static bool mount_and_install(const char *src_path, const char *title_id,
 
   // WRITE TRACKER
   char lnk_path[MAX_PATH];
+  runtime_mount_state_lock();
+  if (runtime_sleep_mode_active()) {
+    (void)rollback_title_nullfs_mount(title_id, src_path);
+    runtime_mount_state_unlock();
+    return false;
+  }
+
   mkdir(APP_BASE, 0777);
   mkdir(user_app_dir, 0777);
   snprintf(lnk_path, sizeof(lnk_path), "%s/mount.lnk", user_app_dir);
-  if (!write_link_file(lnk_path, src_path))
+  if (!write_link_file(lnk_path, src_path)) {
+    (void)rollback_title_nullfs_mount(title_id, src_path);
+    runtime_mount_state_unlock();
     return false;
+  }
 
   log_debug("  [LINK] mount.lnk created: %s -> %s", lnk_path, src_path);
 
@@ -238,8 +248,12 @@ static bool mount_and_install(const char *src_path, const char *title_id,
   snprintf(img_lnk_path, sizeof(img_lnk_path), "%s/mount_img.lnk",
            user_app_dir);
   if (has_image_source) {
-    if (!write_link_file(img_lnk_path, image_source_path))
+    if (!write_link_file(img_lnk_path, image_source_path)) {
+      (void)unlink(lnk_path);
+      (void)rollback_title_nullfs_mount(title_id, src_path);
+      runtime_mount_state_unlock();
       return false;
+    }
     log_debug("  [LINK] mount_img.lnk created: %s -> %s", img_lnk_path,
               image_source_path);
     if (!cache_image_source_mapping(image_source_path, src_path)) {
@@ -250,6 +264,10 @@ static bool mount_and_install(const char *src_path, const char *title_id,
     log_debug("  [LINK] remove failed for %s: %s", img_lnk_path,
               strerror(errno));
   }
+  bool sleep_started = runtime_sleep_mode_active();
+  runtime_mount_state_unlock();
+  if (sleep_started || runtime_sleep_mode_active())
+    return true;
 
   if (!should_register) {
     if (metadata_restaged && has_src_snd0) {
@@ -264,7 +282,7 @@ static bool mount_and_install(const char *src_path, const char *title_id,
 
   if (!metadata_restaged) {
     snprintf(src_snd0, sizeof(src_snd0), "%s/sce_sys/snd0.at9", src_path);
-    has_src_snd0 = path_exists(src_snd0);
+      has_src_snd0 = path_exists(src_snd0);
   }
 
   if (use_app_install_all) {
@@ -343,9 +361,13 @@ void process_scan_candidates(const scan_candidate_t *candidates,
       }
     }
 
-    if (mount_and_install(c->path, c->title_id, c->title_name, c->installed,
-                          !c->in_app_db, use_app_install_all,
-                          &has_src_snd0)) {
+    bool mounted = mount_and_install(c->path, c->title_id, c->title_name,
+                                     c->installed, !c->in_app_db,
+                                     use_app_install_all, &has_src_snd0);
+    if (runtime_sleep_mode_active())
+      return;
+
+    if (mounted) {
       if (use_app_install_all) {
         if (!sm_install_queue_candidate(c, has_src_snd0)) {
           log_debug("  [REG] Failed to queue staged install: %s (%s)",

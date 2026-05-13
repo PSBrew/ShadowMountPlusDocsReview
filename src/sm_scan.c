@@ -535,7 +535,7 @@ int collect_scan_candidates_for_scan_root(const char *scan_root,
                                           bool *unstable_found_out) {
   reset_scan_workspace();
   int candidate_count = 0;
-  const struct AppDbTitleList *app_db_titles = NULL;
+  struct AppDbTitleList app_db_titles = {0};
   bool app_db_titles_ready = get_app_db_title_list_cached(&app_db_titles);
   int discovered_param_root_count = 0;
 
@@ -543,7 +543,7 @@ int collect_scan_candidates_for_scan_root(const char *scan_root,
     log_debug("  [DB] app.db title list unavailable for this scan cycle");
 
   collect_scan_candidates_from_root(scan_root, candidates, max_candidates,
-                                    &candidate_count, app_db_titles,
+                                    &candidate_count, &app_db_titles,
                                     app_db_titles_ready,
                                     g_scan_workspace.discovered_param_roots,
                                     &discovered_param_root_count,
@@ -551,6 +551,7 @@ int collect_scan_candidates_for_scan_root(const char *scan_root,
 
   if (total_found_out)
     *total_found_out = discovered_param_root_count;
+  free_app_db_title_list(&app_db_titles);
   return candidate_count;
 }
 
@@ -559,7 +560,7 @@ int collect_scan_candidates(scan_candidate_t *candidates, int max_candidates,
                             bool *unstable_found_out) {
   reset_scan_workspace();
   int candidate_count = 0;
-  const struct AppDbTitleList *app_db_titles = NULL;
+  struct AppDbTitleList app_db_titles = {0};
   bool app_db_titles_ready = get_app_db_title_list_cached(&app_db_titles);
   int discovered_param_root_count = 0;
 
@@ -572,7 +573,7 @@ int collect_scan_candidates(scan_candidate_t *candidates, int max_candidates,
     collect_scan_candidates_from_root(get_scan_path(i), candidates,
                                       max_candidates,
                                       &candidate_count,
-                                      app_db_titles, app_db_titles_ready,
+                                      &app_db_titles, app_db_titles_ready,
                                       g_scan_workspace.discovered_param_roots,
                                       &discovered_param_root_count,
                                       unstable_found_out);
@@ -580,5 +581,6 @@ int collect_scan_candidates(scan_candidate_t *candidates, int max_candidates,
 
   if (total_found_out)
     *total_found_out = discovered_param_root_count;
+  free_app_db_title_list(&app_db_titles);
   return candidate_count;
 }

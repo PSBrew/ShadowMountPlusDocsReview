@@ -66,10 +66,6 @@ static char *trim_ascii(char *s);
 static bool parse_ini_line(char *line, char **key_out, char **value_out);
 static bool normalize_title_id_value(const char *value,
                                      char out[MAX_TITLE_ID]);
-static bool normalize_absolute_path_value(const char *value,
-                                          char out[MAX_PATH]);
-static bool parse_global_fakelib_priority_ini(const char *value,
-                                              bool *mount_first_out);
 static config_load_status_t load_runtime_config_state(runtime_config_state_t *state);
 static bool parse_u32_ini(const char *value, uint32_t *out);
 static bool is_valid_sector_size(uint32_t size);
@@ -306,33 +302,10 @@ static bool config_file_stamp_equals(const config_file_stamp_t *a,
 
 static void apply_reloadable_runtime_fields(runtime_config_state_t *dst,
                                             const runtime_config_state_t *src) {
-  dst->cfg.debug_enabled = src->cfg.debug_enabled;
-  dst->cfg.quiet_mode = src->cfg.quiet_mode;
-  dst->cfg.mount_read_only = src->cfg.mount_read_only;
-  dst->cfg.force_mount = src->cfg.force_mount;
-  dst->cfg.app_install_all_enabled = src->cfg.app_install_all_enabled;
-  dst->cfg.app_install_all_forced = src->cfg.app_install_all_forced;
-  dst->cfg.backport_fakelib_enabled = src->cfg.backport_fakelib_enabled;
-  dst->cfg.global_fakelib_enabled = src->cfg.global_fakelib_enabled;
-  dst->cfg.global_fakelib_mount_first =
-      src->cfg.global_fakelib_mount_first;
-  (void)strlcpy(dst->cfg.global_fakelib_path,
-                src->cfg.global_fakelib_path,
-                sizeof(dst->cfg.global_fakelib_path));
-  dst->cfg.global_fakelib_exclude_title_count =
-      src->cfg.global_fakelib_exclude_title_count;
-  memcpy(dst->cfg.global_fakelib_exclude_title_ids,
-         src->cfg.global_fakelib_exclude_title_ids,
-         sizeof(dst->cfg.global_fakelib_exclude_title_ids));
-  dst->cfg.kstuff_game_auto_toggle = src->cfg.kstuff_game_auto_toggle;
-  dst->cfg.kstuff_crash_detection_enabled =
-      src->cfg.kstuff_crash_detection_enabled;
-  dst->cfg.scan_interval_us = src->cfg.scan_interval_us;
-  dst->cfg.stability_wait_seconds = src->cfg.stability_wait_seconds;
-  dst->cfg.kstuff_pause_delay_image_seconds =
-      src->cfg.kstuff_pause_delay_image_seconds;
-  dst->cfg.kstuff_pause_delay_direct_seconds =
-      src->cfg.kstuff_pause_delay_direct_seconds;
+  dst->cfg = src->cfg;
+  dst->scan_path_count = src->scan_path_count;
+  memcpy(dst->scan_path_storage, src->scan_path_storage,
+         sizeof(dst->scan_path_storage));
   memcpy(dst->image_mode_rules, src->image_mode_rules,
          sizeof(dst->image_mode_rules));
   memcpy(dst->kstuff_no_pause_title_ids, src->kstuff_no_pause_title_ids,
@@ -547,7 +520,8 @@ static bool normalize_title_id_value(const char *value,
     return false;
 
   char local[MAX_TITLE_ID];
-  (void)strlcpy(local, value, sizeof(local));
+  if (strlcpy(local, value, sizeof(local)) >= sizeof(local))
+    return false;
   char *trimmed = trim_ascii(local);
   size_t len = strlen(trimmed);
   if (len == 0 || len >= MAX_TITLE_ID)
@@ -570,7 +544,8 @@ static bool normalize_image_filename_value(const char *value,
     return false;
 
   char local[MAX_PATH];
-  (void)strlcpy(local, value, sizeof(local));
+  if (strlcpy(local, value, sizeof(local)) >= sizeof(local))
+    return false;
   char *trimmed = trim_ascii(local);
   const char *filename = get_filename_component(trimmed);
   size_t len = strlen(filename);
@@ -578,27 +553,6 @@ static bool normalize_image_filename_value(const char *value,
     return false;
 
   (void)strlcpy(out, filename, MAX_PATH);
-  return true;
-}
-
-static bool normalize_absolute_path_value(const char *value,
-                                          char out[MAX_PATH]) {
-  if (!value || !out)
-    return false;
-
-  char local[MAX_PATH];
-  (void)strlcpy(local, value, sizeof(local));
-  char *trimmed = trim_ascii(local);
-  size_t len = strlen(trimmed);
-  if (len == 0 || len >= MAX_PATH || trimmed[0] != '/')
-    return false;
-
-  while (len > 1 && trimmed[len - 1] == '/') {
-    trimmed[len - 1] = '\0';
-    len--;
-  }
-
-  (void)strlcpy(out, trimmed, MAX_PATH);
   return true;
 }
 
@@ -620,24 +574,6 @@ static bool parse_bool_ini(const char *value, bool *out) {
   return false;
 }
 
-static bool parse_global_fakelib_priority_ini(const char *value,
-                                              bool *mount_first_out) {
-  if (!value || !mount_first_out)
-    return false;
-
-  if (strcasecmp(value, "game") == 0) {
-    *mount_first_out = true;
-    return true;
-  }
-
-  if (strcasecmp(value, "global") == 0) {
-    *mount_first_out = false;
-    return true;
-  }
-
-  return false;
-}
-
 static bool parse_kstuff_delay_rule_value(const char *value,
                                           char title_id_out[MAX_TITLE_ID],
                                           uint32_t *delay_seconds_out) {
@@ -645,7 +581,8 @@ static bool parse_kstuff_delay_rule_value(const char *value,
     return false;
 
   char local[128];
-  (void)strlcpy(local, value, sizeof(local));
+  if (strlcpy(local, value, sizeof(local)) >= sizeof(local))
+    return false;
 
   char *sep = strchr(local, ':');
   if (!sep)
@@ -671,7 +608,8 @@ static bool parse_image_sector_rule_value(const char *value,
     return false;
 
   char local[MAX_PATH];
-  (void)strlcpy(local, value, sizeof(local));
+  if (strlcpy(local, value, sizeof(local)) >= sizeof(local))
+    return false;
 
   char *sep = strrchr(local, ':');
   if (!sep)
@@ -1309,18 +1247,35 @@ static config_load_status_t load_runtime_config_state(runtime_config_state_t *st
     }
 
     if (strcasecmp(key, "global_fakelib_path") == 0) {
-      if (!normalize_absolute_path_value(value,
-                                         state->cfg.global_fakelib_path)) {
+      char local[MAX_PATH];
+      if (strlcpy(local, value, sizeof(local)) >= sizeof(local)) {
         log_debug("  [CFG] invalid global fakelib path at line %d: %s=%s",
                   line_no, key, value);
         continue;
       }
+      char *trimmed = trim_ascii(local);
+      size_t len = strlen(trimmed);
+      if (len == 0 || len >= MAX_PATH || trimmed[0] != '/') {
+        log_debug("  [CFG] invalid global fakelib path at line %d: %s=%s",
+                  line_no, key, value);
+        continue;
+      }
+      while (len > 1 && trimmed[len - 1] == '/') {
+        trimmed[len - 1] = '\0';
+        len--;
+      }
+      (void)strlcpy(state->cfg.global_fakelib_path, trimmed,
+                    sizeof(state->cfg.global_fakelib_path));
       continue;
     }
 
     if (strcasecmp(key, "global_fakelib_priority") == 0) {
-      if (!parse_global_fakelib_priority_ini(
-              value, &state->cfg.global_fakelib_mount_first)) {
+      // Lower-priority overlay must be mounted first.
+      if (strcasecmp(value, "game") == 0) {
+        state->cfg.global_fakelib_mount_first = true;
+      } else if (strcasecmp(value, "global") == 0) {
+        state->cfg.global_fakelib_mount_first = false;
+      } else {
         log_debug("  [CFG] invalid global fakelib priority at line %d: %s=%s "
                   "(use game or global)",
                   line_no, key, value);

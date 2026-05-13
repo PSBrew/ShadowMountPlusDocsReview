@@ -16,9 +16,11 @@ int normalize_snd0info_for_title(const char *title_id);
 // Check whether a title ID exists in a cached app.db title list.
 bool app_db_title_list_contains(const struct AppDbTitleList *list,
                                 const char *title_id);
+// Release a title-list snapshot returned by get_app_db_title_list_cached().
+void free_app_db_title_list(struct AppDbTitleList *list);
 // Drop the cached app.db title list so it is reloaded on next access.
 void invalidate_app_db_title_cache(void);
-// Return the cached app.db title list, loading it if needed.
-bool get_app_db_title_list_cached(const struct AppDbTitleList **list_out);
+// Copy the cached app.db title list into caller-owned storage, loading it if needed.
+bool get_app_db_title_list_cached(struct AppDbTitleList *list_out);
 
 #endif

@@ -8,6 +8,7 @@
 
 static sm_error_t g_last_error;
 static bool g_notifications_initialized = false;
+static pthread_mutex_t g_notifications_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t g_log_mutex = PTHREAD_MUTEX_INITIALIZER;
 static FILE *g_log_file = NULL;
 
@@ -64,10 +65,10 @@ static bool ensure_notification_icon_present(void) {
 }
 
 void sm_notifications_init(void) {
-  if (g_notifications_initialized)
-    return;
-
-  g_notifications_initialized = ensure_notification_icon_present();
+  pthread_mutex_lock(&g_notifications_mutex);
+  if (!g_notifications_initialized)
+    g_notifications_initialized = ensure_notification_icon_present();
+  pthread_mutex_unlock(&g_notifications_mutex);
 }
 
 static void append_json_escaped(char *dst, size_t dst_size, const char *src) {
@@ -142,7 +143,10 @@ static bool send_rich_notification(const char *message) {
     return false;
 
   sm_notifications_init();
-  if (!g_notifications_initialized)
+  pthread_mutex_lock(&g_notifications_mutex);
+  bool notifications_ready = g_notifications_initialized;
+  pthread_mutex_unlock(&g_notifications_mutex);
+  if (!notifications_ready)
     return false;
 
   escaped_message[0] = '\0';

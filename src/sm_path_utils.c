@@ -50,6 +50,7 @@ bool build_backports_root_path(const char *scan_path, char out[MAX_PATH]) {
   if (is_under_image_mount_base(scan_path))
     return false;
 
-  snprintf(out, MAX_PATH, "%s/%s", scan_path, DEFAULT_BACKPORTS_DIR_NAME);
-  return true;
+  int written = snprintf(out, MAX_PATH, "%s/%s", scan_path,
+                         DEFAULT_BACKPORTS_DIR_NAME);
+  return written >= 0 && (size_t)written < MAX_PATH;
 }

@@ -24,6 +24,8 @@ void cleanup_duplicate_title_mounts(void);
 int remount_system_ex(void);
 // Mount a title source into /system_ex/app/<title_id> via nullfs.
 bool mount_title_nullfs(const char *title_id, const char *src_path);
+// Roll back a just-mounted title nullfs layer when publication is aborted.
+bool rollback_title_nullfs_mount(const char *title_id, const char *src_path);
 // Reconcile the title mount stack against the expected source/backport state.
 bool reconcile_title_backport_mount(const char *title_id, const char *src_path,
                                     const char *expected_backport_path,

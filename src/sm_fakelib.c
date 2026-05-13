@@ -2,9 +2,10 @@
 
 #include "sm_fakelib.h"
 #include "sm_config_mount.h"
-#include "sm_filesystem.h"
 #include "sm_log.h"
 #include "sm_types.h"
+
+#include <pthread.h>
 
 typedef struct {
   char source_path[MAX_PATH];
@@ -20,6 +21,7 @@ typedef struct {
 } fakelib_session_t;
 
 static fakelib_session_t g_fakelib_mount;
+static pthread_mutex_t g_fakelib_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 bool sm_fakelib_game_feature_enabled(void) {
   return runtime_config()->backport_fakelib_enabled;
@@ -102,8 +104,14 @@ static bool resolve_sandbox_context(const char *title_id,
     const char *suffix = entry->d_name + title_len + 1u;
     if (!isdigit((unsigned char)suffix[0]))
       continue;
+    if (strlen(entry->d_name) >= sizeof(sandbox_id))
+      continue;
 
-    int idx = atoi(suffix);
+    errno = 0;
+    long idx_long = strtol(suffix, NULL, 10);
+    if (errno == ERANGE || idx_long > INT_MAX)
+      continue;
+    int idx = (int)idx_long;
     if (idx < best_index)
       continue;
 
@@ -159,9 +167,6 @@ static bool resolve_global_fakelib_source(const char *title_id,
   if (is_global_fakelib_excluded_for_title(title_id))
     return false;
 
-  if (!read_mount_link(title_id, source_path, MAX_PATH))
-    return false;
-
   struct stat st;
   if (stat(cfg->global_fakelib_path, &st) != 0) {
     if (errno != ENOENT)
@@ -199,12 +204,16 @@ static bool cleanup_fakelib_mount(void) {
 }
 
 void sm_fakelib_game_on_exec(pid_t pid, const char *title_id) {
-  if (!sm_fakelib_game_feature_enabled())
+  pthread_mutex_lock(&g_fakelib_mutex);
+  if (!sm_fakelib_game_feature_enabled()) {
+    pthread_mutex_unlock(&g_fakelib_mutex);
     return;
+  }
 
   if (g_fakelib_mount.layer_count > 0 && g_fakelib_mount.pid == pid) {
     log_debug("  [FAKELIB] already tracking pid=%ld for %s", (long)pid,
               title_id);
+    pthread_mutex_unlock(&g_fakelib_mutex);
     return;
   }
 
@@ -214,6 +223,7 @@ void sm_fakelib_game_on_exec(pid_t pid, const char *title_id) {
     if (!cleanup_fakelib_mount()) {
       log_debug("  [FAKELIB] handoff cleanup failed for pid=%ld, skipping %s",
                 (long)g_fakelib_mount.pid, title_id);
+      pthread_mutex_unlock(&g_fakelib_mutex);
       return;
     }
   }
@@ -221,14 +231,18 @@ void sm_fakelib_game_on_exec(pid_t pid, const char *title_id) {
   char game_source_path[MAX_PATH];
   char global_source_path[MAX_PATH];
   char mount_path[MAX_PATH];
-  if (!resolve_sandbox_context(title_id, game_source_path, mount_path))
+  if (!resolve_sandbox_context(title_id, game_source_path, mount_path)) {
+    pthread_mutex_unlock(&g_fakelib_mutex);
     return;
+  }
 
   bool has_global =
       resolve_global_fakelib_source(title_id, global_source_path);
   bool has_game = (game_source_path[0] != '\0');
-  if (!has_global && !has_game)
+  if (!has_global && !has_game) {
+    pthread_mutex_unlock(&g_fakelib_mutex);
     return;
+  }
 
   memset(&g_fakelib_mount, 0, sizeof(g_fakelib_mount));
   g_fakelib_mount.pid = pid;
@@ -243,6 +257,7 @@ void sm_fakelib_game_on_exec(pid_t pid, const char *title_id) {
     if (!track_fakelib_overlay(title_id, global_source_path, mount_path,
                                "global")) {
       (void)cleanup_fakelib_mount();
+      pthread_mutex_unlock(&g_fakelib_mutex);
       return;
     }
   }
@@ -251,6 +266,7 @@ void sm_fakelib_game_on_exec(pid_t pid, const char *title_id) {
     if (!track_fakelib_overlay(title_id, game_source_path, mount_path,
                                "game")) {
       (void)cleanup_fakelib_mount();
+      pthread_mutex_unlock(&g_fakelib_mutex);
       return;
     }
   }
@@ -259,23 +275,31 @@ void sm_fakelib_game_on_exec(pid_t pid, const char *title_id) {
     if (!track_fakelib_overlay(title_id, global_source_path, mount_path,
                                "global")) {
       (void)cleanup_fakelib_mount();
+      pthread_mutex_unlock(&g_fakelib_mutex);
       return;
     }
   }
 
   if (has_game)
     notify_system_info("Game backported: %s", title_id);
+  pthread_mutex_unlock(&g_fakelib_mutex);
 }
 
 void sm_fakelib_game_on_exit(pid_t pid) {
-  if (g_fakelib_mount.layer_count == 0 || g_fakelib_mount.pid != pid)
+  pthread_mutex_lock(&g_fakelib_mutex);
+  if (g_fakelib_mount.layer_count == 0 || g_fakelib_mount.pid != pid) {
+    pthread_mutex_unlock(&g_fakelib_mutex);
     return;
+  }
 
   log_debug("  [FAKELIB] game stopped: pid=%ld mount=%s", (long)pid,
             g_fakelib_mount.mount_path);
   cleanup_fakelib_mount();
+  pthread_mutex_unlock(&g_fakelib_mutex);
 }
 
 void sm_fakelib_game_shutdown(void) {
+  pthread_mutex_lock(&g_fakelib_mutex);
   (void)cleanup_fakelib_mount();
+  pthread_mutex_unlock(&g_fakelib_mutex);
 }

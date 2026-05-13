@@ -1,5 +1,6 @@
 #include "sm_platform.h"
 
+#include <pthread.h>
 #include <sqlite3.h>
 
 #include "sm_runtime.h"
@@ -15,6 +16,7 @@ static sqlite3_stmt *g_app_db_stmt_normalize_snd0;
 static struct AppDbTitleList g_app_db_title_cache;
 static bool g_app_db_title_cache_ready = false;
 static time_t g_app_db_title_cache_mtime = 0;
+static pthread_mutex_t g_app_db_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 #define APP_DB_STARTUP_MAINTENANCE_RETRIES 3
 #define APP_DB_STARTUP_MAINTENANCE_BUSY_TIMEOUT_MS 250
@@ -34,7 +36,7 @@ static void close_app_db(void) {
   }
 }
 
-static void free_app_db_title_list(struct AppDbTitleList *list) {
+void free_app_db_title_list(struct AppDbTitleList *list) {
   free(list->ids);
   list->ids = NULL;
   list->count = 0;
@@ -42,10 +44,12 @@ static void free_app_db_title_list(struct AppDbTitleList *list) {
 }
 
 void shutdown_app_db(void) {
+  pthread_mutex_lock(&g_app_db_mutex);
   free_app_db_title_list(&g_app_db_title_cache);
   g_app_db_title_cache_ready = false;
   g_app_db_title_cache_mtime = 0;
   close_app_db();
+  pthread_mutex_unlock(&g_app_db_mutex);
 }
 
 static bool ensure_app_db_open(void) {
@@ -164,8 +168,11 @@ static int app_db_query_int(const char *sql, const char *label) {
 }
 
 bool app_db_run_startup_maintenance(void) {
+  bool ok = false;
+  pthread_mutex_lock(&g_app_db_mutex);
+
   if (!ensure_app_db_open())
-    return false;
+    goto out;
   (void)sqlite3_busy_timeout(g_app_db,
                              APP_DB_STARTUP_MAINTENANCE_BUSY_TIMEOUT_MS);
 
@@ -177,7 +184,7 @@ bool app_db_run_startup_maintenance(void) {
       app_db_query_int(backfill_count_sql, "snd0info normalize backfill check");
   if (pending_backfill < 0) {
     close_app_db();
-    return false;
+    goto out;
   }
 
   int changes = 0;
@@ -192,17 +199,24 @@ bool app_db_run_startup_maintenance(void) {
     if (!app_db_exec_with_retry(backfill_sql,
                                 APP_DB_STARTUP_MAINTENANCE_RETRIES,
                                 "snd0info startup normalize", &changes))
-      return false;
+      goto out;
   }
 
   log_debug("  [DB] snd0info startup maintenance done rows=%d pending=%d",
             changes, pending_backfill);
 
   close_app_db();
-  return true;
+  ok = true;
+
+out:
+  pthread_mutex_unlock(&g_app_db_mutex);
+  return ok;
 }
 
 int update_snd0info(const char *title_id) {
+  int result = -1;
+  pthread_mutex_lock(&g_app_db_mutex);
+
   if (!g_app_db_stmt_update_snd0) {
     const char *sql =
         "UPDATE tbl_contentinfo "
@@ -212,7 +226,7 @@ int update_snd0info(const char *title_id) {
                                             APP_DB_PREPARE_BUSY_RETRIES,
                                             "snd0info update");
     if (prep_rc != SQLITE_OK)
-      return -1;
+      goto out;
   }
 
   for (int attempt = 0; attempt < APP_DB_UPDATE_BUSY_RETRIES; attempt++) {
@@ -223,14 +237,15 @@ int update_snd0info(const char *title_id) {
       log_debug("  [DB] bind failed for snd0info update: %s",
                 sqlite3_errmsg(g_app_db));
       close_app_db();
-      return -1;
+      goto out;
     }
 
     int rc = sqlite3_step(g_app_db_stmt_update_snd0);
     if (rc == SQLITE_DONE) {
       int changes = sqlite3_changes(g_app_db);
       close_app_db();
-      return changes;
+      result = changes;
+      goto out;
     }
 
     if (app_db_wait_retry(rc, attempt, APP_DB_UPDATE_BUSY_RETRIES, false))
@@ -239,14 +254,19 @@ int update_snd0info(const char *title_id) {
     log_debug("  [DB] step failed for snd0info update: rc=%d err=%s", rc,
               sqlite3_errmsg(g_app_db));
     close_app_db();
-    return -1;
+    goto out;
   }
 
   close_app_db();
-  return -1;
+out:
+  pthread_mutex_unlock(&g_app_db_mutex);
+  return result;
 }
 
 int normalize_snd0info_for_title(const char *title_id) {
+  int result = -1;
+  pthread_mutex_lock(&g_app_db_mutex);
+
   if (!g_app_db_stmt_normalize_snd0) {
     const char *sql =
         "UPDATE tbl_contentinfo "
@@ -259,7 +279,7 @@ int normalize_snd0info_for_title(const char *title_id) {
                                             APP_DB_PREPARE_BUSY_RETRIES,
                                             "snd0info normalize");
     if (prep_rc != SQLITE_OK)
-      return -1;
+      goto out;
   }
 
   for (int attempt = 0; attempt < APP_DB_UPDATE_BUSY_RETRIES; attempt++) {
@@ -270,14 +290,15 @@ int normalize_snd0info_for_title(const char *title_id) {
       log_debug("  [DB] bind failed for snd0info normalize: %s",
                 sqlite3_errmsg(g_app_db));
       close_app_db();
-      return -1;
+      goto out;
     }
 
     int rc = sqlite3_step(g_app_db_stmt_normalize_snd0);
     if (rc == SQLITE_DONE) {
       int changes = sqlite3_changes(g_app_db);
       close_app_db();
-      return changes;
+      result = changes;
+      goto out;
     }
 
     if (app_db_wait_retry(rc, attempt, APP_DB_UPDATE_BUSY_RETRIES, false))
@@ -286,11 +307,13 @@ int normalize_snd0info_for_title(const char *title_id) {
     log_debug("  [DB] step failed for snd0info normalize: rc=%d err=%s", rc,
               sqlite3_errmsg(g_app_db));
     close_app_db();
-    return -1;
+    goto out;
   }
 
   close_app_db();
-  return -1;
+out:
+  pthread_mutex_unlock(&g_app_db_mutex);
+  return result;
 }
 
 static bool append_app_db_title(struct AppDbTitleList *list,
@@ -319,6 +342,8 @@ static int compare_title_id_str(const void *a, const void *b) {
 
 bool app_db_title_list_contains(const struct AppDbTitleList *list,
                                 const char *title_id) {
+  if (list->count <= 0)
+    return false;
   return bsearch(title_id, list->ids, (size_t)list->count, sizeof(*list->ids),
                  compare_title_id_str) != NULL;
 }
@@ -380,14 +405,18 @@ static bool load_app_db_title_list(struct AppDbTitleList *list) {
 }
 
 void invalidate_app_db_title_cache(void) {
+  pthread_mutex_lock(&g_app_db_mutex);
   g_app_db_title_cache_ready = false;
   g_app_db_title_cache_mtime = 0;
+  pthread_mutex_unlock(&g_app_db_mutex);
 }
 
-bool get_app_db_title_list_cached(const struct AppDbTitleList **list_out) {
+bool get_app_db_title_list_cached(struct AppDbTitleList *list_out) {
   if (!list_out)
     return false;
-  *list_out = NULL;
+
+  free_app_db_title_list(list_out);
+  pthread_mutex_lock(&g_app_db_mutex);
 
   struct stat st;
   int app_db_stat_rc = stat(APP_DB_PATH, &st);
@@ -402,11 +431,28 @@ bool get_app_db_title_list_cached(const struct AppDbTitleList **list_out) {
       g_app_db_title_cache_ready = true;
     } else {
       free_app_db_title_list(&fresh);
-      if (!g_app_db_title_cache_ready)
+      if (!g_app_db_title_cache_ready) {
+        pthread_mutex_unlock(&g_app_db_mutex);
         return false;
+      }
     }
   }
 
-  *list_out = &g_app_db_title_cache;
-  return true;
+  bool copied = true;
+  if (g_app_db_title_cache.count > 0) {
+    char(*ids)[MAX_TITLE_ID] =
+        malloc((size_t)g_app_db_title_cache.count * sizeof(*ids));
+    if (ids) {
+      memcpy(ids, g_app_db_title_cache.ids,
+             (size_t)g_app_db_title_cache.count * sizeof(*ids));
+      list_out->ids = ids;
+      list_out->count = g_app_db_title_cache.count;
+      list_out->capacity = g_app_db_title_cache.count;
+    } else {
+      copied = false;
+    }
+  }
+
+  pthread_mutex_unlock(&g_app_db_mutex);
+  return copied;
 }

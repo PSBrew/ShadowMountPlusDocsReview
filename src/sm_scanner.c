@@ -9,6 +9,7 @@
 #include "sm_fakelib.h"
 #include "sm_filesystem.h"
 #include "sm_game_lifecycle.h"
+#include "sm_hash.h"
 #include "sm_image.h"
 #include "sm_install.h"
 #include "sm_install_queue.h"
@@ -216,6 +217,24 @@ static bool fakelib_runtime_config_changed(const runtime_config_t *old_cfg,
          memcmp(old_cfg->global_fakelib_exclude_title_ids,
                 new_cfg->global_fakelib_exclude_title_ids,
                 sizeof(old_cfg->global_fakelib_exclude_title_ids)) != 0;
+}
+
+static uint32_t scanner_config_topology_hash(void) {
+  uint32_t hash = 2166136261u;
+  int scan_path_count = get_scan_path_count();
+  uint32_t values[] = {runtime_config()->scan_depth, (uint32_t)scan_path_count};
+
+  for (size_t i = 0; i < sizeof(values) / sizeof(values[0]); i++) {
+    for (unsigned shift = 0; shift < 32u; shift += 8u) {
+      hash ^= (values[i] >> shift) & 0xffu;
+      hash *= 16777619u;
+    }
+  }
+  for (int i = 0; i < scan_path_count; i++) {
+    hash ^= sm_fnv1a32(get_scan_path(i));
+    hash *= 16777619u;
+  }
+  return hash;
 }
 
 static size_t scanner_watch_fd_hash(uintptr_t ident) {
@@ -873,17 +892,31 @@ static void reopen_config_file_watch(int kq, uint64_t now_us) {
   register_config_file_watch(kq, now_us);
 }
 
-static void apply_runtime_config_reload_effects(const runtime_config_t *old_cfg,
-                                                const runtime_config_t *new_cfg) {
+static bool apply_runtime_config_reload_effects(int kq,
+                                                const runtime_config_t *old_cfg,
+                                                const runtime_config_t *new_cfg,
+                                                bool scan_topology_changed) {
   if (old_cfg->backport_fakelib_enabled &&
       fakelib_runtime_config_changed(old_cfg, new_cfg))
     sm_fakelib_game_shutdown();
 
   sm_kstuff_on_config_reload();
 
+  if (scan_topology_changed) {
+    clear_scanner_watch_entries();
+    reset_scanner_root_states();
+    if (!rebuild_all_scan_root_watch_trees(kq)) {
+      log_debug("  [CFG] scanner watch rebuild failed after config reload");
+      return false;
+    } else {
+      log_debug("  [CFG] scanner watches rebuilt after scan config reload");
+    }
+  }
+
   if (!refresh_game_lifecycle_watcher()) {
     log_debug("  [CFG] lifecycle watcher refresh failed after config reload");
   }
+  return true;
 }
 
 static bool should_abort_scan_cycle(void) {
@@ -1134,8 +1167,7 @@ static bool process_scanner_events(int kq, const struct timespec *timeout,
     if (event->ident == (uintptr_t)g_scanner_config_fd) {
       if ((event->fflags & (NOTE_DELETE | NOTE_RENAME | NOTE_REVOKE)) != 0)
         reopen_config_file_watch(kq, now_us);
-      if (g_scanner_config_fd >= 0)
-        schedule_config_reload(now_us);
+      schedule_config_reload(now_us);
       continue;
     }
 
@@ -1391,17 +1423,34 @@ void sm_scanner_run_loop(void) {
       g_scanner_config_reload_pending = false;
       g_scanner_config_reload_ready_after_us = 0;
 
+      uint32_t old_scan_topology_hash = scanner_config_topology_hash();
       runtime_config_t old_cfg = *runtime_config();
       bool reloaded = false;
       if (!reload_runtime_config_if_changed(&reloaded)) {
         log_debug("  [CFG] runtime config reload failed");
       } else if (reloaded) {
         const runtime_config_t *new_cfg = runtime_config();
-        apply_runtime_config_reload_effects(&old_cfg, new_cfg);
+        bool scan_topology_changed =
+            old_scan_topology_hash != scanner_config_topology_hash();
+        if (!apply_runtime_config_reload_effects(kq, &old_cfg, new_cfg,
+                                                 scan_topology_changed)) {
+          close(kq);
+          clear_scanner_watch_entries();
+          request_scanner_shutdown("scanner watcher rebuild after config reload failed");
+          return;
+        }
+        if (scan_topology_changed && !discard_scanner_events_nowait(kq)) {
+          close(kq);
+          clear_scanner_watch_entries();
+          request_scanner_shutdown("scanner stale event drain after config reload failed");
+          return;
+        }
         notify_system("ShadowMount+: config reloaded.");
         log_debug("  [CFG] runtime config reloaded");
         now_us = monotonic_time_us();
-        next_full_resync_us = now_us + scanner_full_resync_interval_us();
+        next_full_resync_us =
+            scan_topology_changed ? now_us
+                                  : now_us + scanner_full_resync_interval_us();
       }
       continue;
     }

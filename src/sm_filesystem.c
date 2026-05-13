@@ -46,9 +46,20 @@ static bool read_mount_link_file(const char *lnk_path, char *out,
     out[0] = '\0';
     return false;
   }
-  fclose(f);
 
   size_t len = strcspn(out, "\r\n");
+  bool truncated = false;
+  if (out[len] == '\0' && len + 1u >= out_size) {
+    int next = fgetc(f);
+    truncated = (next != EOF && next != '\n' && next != '\r');
+  }
+  fclose(f);
+
+  if (truncated) {
+    out[0] = '\0';
+    return false;
+  }
+
   out[len] = '\0';
   return out[0] != '\0';
 }
@@ -164,7 +175,10 @@ static bool source_path_needs_cleanup(const char *source_path,
     return true;
 
   char eboot_path[MAX_PATH];
-  snprintf(eboot_path, sizeof(eboot_path), "%s/eboot.bin", source_path);
+  int written =
+      snprintf(eboot_path, sizeof(eboot_path), "%s/eboot.bin", source_path);
+  if (written < 0 || (size_t)written >= sizeof(eboot_path))
+    return true;
   if (path_exists(eboot_path))
     return false;
 
@@ -469,6 +483,24 @@ static bool unmount_top_controlled_layer(const char *path) {
   return false;
 }
 
+static bool title_stack_top_is_managed(const title_mount_state_t *state) {
+  return state->top_is_our_nullfs || state->top_kind == TITLE_STACK_TOP_BACKPORT;
+}
+
+bool rollback_title_nullfs_mount(const char *title_id, const char *src_path) {
+  title_mount_state_t state;
+  if (!inspect_title_stack(title_id, src_path, NULL, &state))
+    return false;
+  if (!state.top_is_our_nullfs)
+    return false;
+
+  if (!unmount_top_controlled_layer(state.system_ex_path))
+    return false;
+  log_debug("  [LINK] rolled back unpublished nullfs mount: %s -> %s",
+            src_path, state.system_ex_path);
+  return true;
+}
+
 bool reconcile_title_backport_mount(const char *title_id, const char *src_path,
                                     const char *expected_backport_path,
                                     bool *overlay_active_out) {
@@ -578,6 +610,12 @@ static bool cleanup_duplicate_title_mounts_entry(const char *title_id,
       !state.has_our_nullfs) {
     return true;
   }
+  if (!title_stack_top_is_managed(&state)) {
+    log_debug("  [LINK] duplicate managed mount layers kept for %s: top layer "
+              "is not managed by ShadowMount",
+              state.system_ex_path);
+    return true;
+  }
 
   log_debug(
       "  [LINK] duplicate managed mount layers for %s: nullfs=%d backport=%d. "
@@ -607,6 +645,10 @@ static int copy_param_json_rewrite(const char *src, const char *dst) {
   }
   long file_size = ftell(fs);
   if (file_size < 0) {
+    fclose(fs);
+    return -1;
+  }
+  if ((unsigned long)file_size > MAX_PARAM_JSON_SIZE) {
     fclose(fs);
     return -1;
   }
@@ -708,8 +750,13 @@ int copy_dir(const char *src, const char *dst) {
   while ((e = readdir(d))) {
     if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, ".."))
       continue;
-    snprintf(ss, sizeof(ss), "%s/%s", src, e->d_name);
-    snprintf(dd, sizeof(dd), "%s/%s", dst, e->d_name);
+    int src_written = snprintf(ss, sizeof(ss), "%s/%s", src, e->d_name);
+    int dst_written = snprintf(dd, sizeof(dd), "%s/%s", dst, e->d_name);
+    if (src_written < 0 || (size_t)src_written >= sizeof(ss) ||
+        dst_written < 0 || (size_t)dst_written >= sizeof(dd)) {
+      ret = -1;
+      break;
+    }
     if (lstat(ss, &lst) != 0) {
       ret = -1;
       break;
@@ -761,7 +808,12 @@ bool mount_title_nullfs(const char *title_id, const char *src_path) {
   char src_eboot[MAX_PATH];
   char dst_eboot[MAX_PATH];
   snprintf(dst, sizeof(dst), "/system_ex/app/%s", title_id);
-  snprintf(src_eboot, sizeof(src_eboot), "%s/eboot.bin", src_path);
+  int written = snprintf(src_eboot, sizeof(src_eboot), "%s/eboot.bin", src_path);
+  if (written < 0 || (size_t)written >= sizeof(src_eboot)) {
+    log_debug("  [LINK] source eboot path too long for %s: %s", title_id,
+              src_path);
+    return false;
+  }
   snprintf(dst_eboot, sizeof(dst_eboot), "%s/eboot.bin", dst);
 
   struct stat src_st;
@@ -811,8 +863,7 @@ bool mount_title_nullfs(const char *title_id, const char *src_path) {
     return false;
   }
   if (state.mounted) {
-    if (state.has_our_nullfs &&
-        (state.top_is_our_nullfs || state.has_our_backport) &&
+    if (state.has_our_nullfs && title_stack_top_is_managed(&state) &&
         path_exists(dst_eboot)) {
       log_debug("  [LINK] mount stack already active: %s -> %s", src_path, dst);
       return true;
@@ -925,13 +976,14 @@ static bool cleanup_mount_links_entry(const char *title_id,
   bool mount_link_staged = false;
   if (ctx->unmount_system_ex_bind) {
     title_mount_state_t state;
+    memset(&state, 0, sizeof(state));
     bool inspected = inspect_title_stack(title_id, source_path,
                                          ctx->removed_source_root, &state);
-    bool top_is_ours = state.top_is_our_nullfs || state.has_our_backport;
+    bool top_is_ours = inspected && title_stack_top_is_managed(&state);
     bool stack_matches_link = false;
-    if (source_path[0] != '\0') {
+    if (inspected && source_path[0] != '\0') {
       stack_matches_link = state.has_our_nullfs;
-    } else if (matches_removed_source && ctx->removed_source_root &&
+    } else if (inspected && matches_removed_source && ctx->removed_source_root &&
                ctx->removed_source_root[0] != '\0') {
       stack_matches_link = state.has_nullfs_from_root;
     }
@@ -1040,7 +1092,7 @@ static bool shutdown_title_mounts_entry(const char *title_id,
   title_mount_state_t state;
   if (!inspect_title_stack(title_id, source_path, NULL, &state) ||
       !state.has_our_nullfs ||
-      (!state.top_is_our_nullfs && !state.has_our_backport)) {
+      !title_stack_top_is_managed(&state)) {
     return true;
   }
 

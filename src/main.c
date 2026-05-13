@@ -43,6 +43,7 @@ static volatile sig_atomic_t g_stop_requested = 0;
 static atomic_bool g_shutdown_on_going_stop_requested = false;
 static atomic_bool g_runtime_sleep_mode_active = false;
 static _Atomic(uintptr_t) g_shutdown_stop_reason_bits = 0;
+static pthread_mutex_t g_runtime_mount_state_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct {
   pthread_mutex_t reason_mutex;
@@ -132,6 +133,14 @@ bool request_runtime_sleep_mode(bool active, const char *reason) {
   sm_scanner_wake();
   wake_game_lifecycle_watcher();
   return true;
+}
+
+void runtime_mount_state_lock(void) {
+  pthread_mutex_lock(&g_runtime_mount_state_mutex);
+}
+
+void runtime_mount_state_unlock(void) {
+  pthread_mutex_unlock(&g_runtime_mount_state_mutex);
 }
 
 void request_scan_now(const char *reason) {

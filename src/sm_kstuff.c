@@ -842,13 +842,13 @@ void sm_kstuff_sleep_enter(void) {
     return;
 
   was_enabled = sm_kstuff_is_enabled();
-  g_kstuff.sleep_pause_restore = was_enabled;
   (void)apply_kstuff_enabled_state(false, false, &fully_disabled);
   if (!fully_disabled) {
     log_debug("  [KSTUFF] failed to pause for system sleep");
     return;
   }
 
+  g_kstuff.sleep_pause_restore = was_enabled;
   if (was_enabled)
     log_debug("  [KSTUFF] paused for system sleep");
 }
