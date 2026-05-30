@@ -8,6 +8,8 @@ typedef struct scan_candidate scan_candidate_t;
 
 // Return whether a title is already waiting for async batch installation.
 bool is_title_install_pending(const char *title_id);
+// Drop queued/submitted async install state for a title after confirmed removal.
+void sm_install_forget_pending_title(const char *title_id);
 // Return the next pending-install wake deadline in monotonic microseconds.
 uint64_t sm_install_next_wake_us(uint64_t now_us);
 // Poll async batch installs for success/timeout completion only.

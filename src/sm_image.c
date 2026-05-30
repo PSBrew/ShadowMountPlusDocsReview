@@ -1114,28 +1114,29 @@ void cleanup_mount_dirs(void) {
   closedir(d);
 }
 
-void maybe_mount_image_file(const char *full_path, const char *display_name,
+bool maybe_mount_image_file(const char *full_path, const char *display_name,
                             bool *unstable_out) {
   image_fs_type_t fs_type = detect_image_fs_type(display_name);
   if (fs_type == IMAGE_FS_UNKNOWN)
-    return;
+    return false;
   if (!is_source_stable_for_mount(full_path, display_name, "IMG")) {
     if (unstable_out)
       *unstable_out = true;
-    return;
+    return false;
   }
   if (is_image_mount_limited(full_path))
-    return;
+    return false;
 
   if (mount_image(full_path, fs_type)) {
     clear_image_mount_attempts(full_path);
-    return;
+    return true;
   }
 
   int mount_err = errno;
   if (bump_image_mount_attempts(full_path) == 1 && !sm_error_notified()) {
     notify_image_mount_failed(full_path, mount_err);
   }
+  return false;
 }
 
 bool shutdown_image_mounts(void) {

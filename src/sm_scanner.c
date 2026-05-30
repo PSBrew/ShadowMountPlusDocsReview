@@ -6,6 +6,7 @@
 #include <sys/select.h>
 
 #include "sm_config_mount.h"
+#include "sm_appdb.h"
 #include "sm_fakelib.h"
 #include "sm_filesystem.h"
 #include "sm_game_lifecycle.h"
@@ -1508,6 +1509,7 @@ void sm_scanner_run_loop(void) {
     if (g_scanner_manual_scan_due_us != 0 &&
         now_us >= g_scanner_manual_scan_due_us) {
       g_scanner_manual_scan_due_us = 0;
+      invalidate_app_db_title_cache();
 
       bool unstable_found = false;
       if (!run_full_scan_cycle(false, "manual.lst changed", &unstable_found)) {

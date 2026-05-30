@@ -3,9 +3,11 @@
 #include "sm_manual.h"
 
 #include "sm_appdb.h"
+#include "sm_install_queue.h"
 #include "sm_limits.h"
 #include "sm_log.h"
 #include "sm_paths.h"
+#include "sm_title_state.h"
 
 #define MANUAL_STATUS_CAPACITY 1024
 
@@ -354,6 +356,9 @@ bool sm_manual_reconcile_deleted_titles(
 
     entry->status = MANUAL_STATUS_DELETED;
     entry->remove_from_list = true;
+    sm_install_forget_pending_title(entry->title_id);
+    clear_register_attempts(entry->title_id);
+    clear_failed_mount_attempts(entry->title_id);
     changed = true;
     log_debug("  [MANUAL] title removed from app.db, disabling manual entry: "
               "%s (%s)",

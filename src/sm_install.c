@@ -310,6 +310,7 @@ static bool mount_and_install(const char *src_path, const char *title_id,
 
   if (res == 0) {
     invalidate_app_db_title_cache();
+    clear_register_attempts(title_id);
     log_debug("  [REG] Installed NEW!");
     notify_game_installed_rich(title_id);
     if (has_src_snd0) {
@@ -319,6 +320,7 @@ static bool mount_and_install(const char *src_path, const char *title_id,
     }
   } else if ((uint32_t)res == 0x80990002u) {
     invalidate_app_db_title_cache();
+    clear_register_attempts(title_id);
     log_debug("  [REG] Restored.");
     if (has_src_snd0) {
       int snd0_updates = update_snd0info(title_id);

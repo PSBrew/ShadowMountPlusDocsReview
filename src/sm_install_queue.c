@@ -146,6 +146,12 @@ bool is_title_install_pending(const char *title_id) {
   return find_pending_install_entry(title_id) != NULL;
 }
 
+void sm_install_forget_pending_title(const char *title_id) {
+  pending_install_entry_t *entry = find_pending_install_entry(title_id);
+  if (entry)
+    clear_pending_install_entry(entry);
+}
+
 static void append_batch_install_line(char *message, size_t message_size,
                                       const char *title_name,
                                       const char *title_id, int *shown_count) {
@@ -222,6 +228,7 @@ static void finalize_pending_install_success(pending_install_entry_t *entry) {
   if (entry->manual)
     sm_manual_note_installed(entry->manual_source_path, entry->title_id,
                              entry->title_name);
+  clear_register_attempts(entry->title_id);
   clear_failed_mount_attempts(entry->title_id);
   clear_pending_install_entry(entry);
 }

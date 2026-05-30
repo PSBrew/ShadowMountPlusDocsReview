@@ -455,7 +455,8 @@ static void collect_scan_candidates_from_manual_path(
 
   const char *name = get_filename_component(manual_path);
   if (S_ISREG(st.st_mode) && is_supported_image_file_name(name)) {
-    maybe_mount_image_file(manual_path, name, unstable_found_out);
+    if (!maybe_mount_image_file(manual_path, name, unstable_found_out))
+      return;
 
     char mount_point[MAX_PATH];
     get_image_mount_point_for_source(manual_path, mount_point);
