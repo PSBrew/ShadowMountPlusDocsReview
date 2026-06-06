@@ -207,7 +207,7 @@ mkpfs pack folder --verify --no-compress --no-adjust-output-file-extension --ver
   './pfs_image.dat'
 ```
 
-Then pack the nested image into a compressed PFS container:
+Then pack the nested image (**pfs_image.dat**) into a compressed PFS container:
 
 ```bash
 mkpfs pack file --verify --version PS5 --inode-bits 32 \
