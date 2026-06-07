@@ -41,6 +41,7 @@ Notes:
 - Prefer **UFS (`.ffpkg`)** in most cases: this is the recommended default image format for ShadowMountPlus.
 - Use **exFAT (`.exfat`)** only for games that do not work correctly unless they are handled like external-drive content.
 - If you create an **exFAT (`.exfat`)** image manually, use a **`64 KB` cluster size**. Smaller clusters can cause a noticeable performance loss.
+- Use **compressed PFS containers (`.ffpfsc`)** if you want to experiment with compressed formats; prefer the recommended `.ffpfsc` container layout with a nested exFAT image.
 
 ## Runtime config (`/data/shadowmount/config.ini`)
 
