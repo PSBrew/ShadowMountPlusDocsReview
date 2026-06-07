@@ -223,7 +223,7 @@ Then pack the exFAT image into a compressed PFS container (.ffpfsc):
 python -m pip install -U "mkpfs"
 
 # Convert the .exfat image into a .ffpfsc compressed PFS container. 
-python -m mkpfs pack file --verify './PPSA12345.exfat' './PPSA12345.exfat.ffpfsc'
+python -m mkpfs pack file --verify './PPSA12345.exfat' './PPSA12345.ffpfsc'
 
 # OPTIONAL: After successful packing, the temporary exFAT image can be removed
 rm './PPSA12345.exfat'
@@ -249,7 +249,7 @@ python -m mkpfs pack file --verify './pfs_image.dat' './BREW1234.ffpfsc'
 rm './pfs_image.dat'
 ```
 
-## Compressed PFS Folders (`.ffpfs`)
+## Direct Compressed PFS images (`.ffpfs`)
 
 Using a direct compressed PFS image, without the nested container layer, is
 still experimental and might not work for several games.
